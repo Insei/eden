@@ -309,10 +309,24 @@ eden eve onboard
 
 Eden is the only thing you need to work with Raspberry and deploy containers there:
 
-Step 0: If you already have EVE on your SD and want to try the new version, please format SD card
+Step 0: Check RPi power supply. For example by running raspberry pi os and checking dmesg log if you find "Undervoltage detected!" messages, you need to replace the raspberry power supply with a more powerful one.
+
+```
+dmesg | grep -i "Undervoltage"
+```
+
+A voltage issue causes the kernel to freeze after mmc initialization, with or without reported this issue.
+
+Step 1: If you already have EVE on your SD and want to try the new version, please format SD card
 with zeroes (at least first 700 MB).
 
-Step 1: Install EVE on Raspberry instead of any other OS.
+For example for Ubuntu:
+
+```
+sudo dd bs=1024k count=1000 if=/dev/zero of=/dev/sdX
+```
+
+Step 2: Install EVE on Raspberry instead of any other OS.
 
 Prepare Raspberry image
 
@@ -339,7 +353,7 @@ sudo diskutil eject /dev/rdiskN
 
 Put in SD card into Raspberry and power it on
 
-Step 2: Connect to  Raspberry and run some app.
+Step 3: Connect to  Raspberry and run some app.
 
 ```console
 eden eve onboard
