@@ -1,0 +1,84 @@
+---
+name: EdenPacketARM
+on:  # yamllint disable-line rule:truthy
+  push:
+    branches: [packet-workflow]
+# yamllint disable rule:line-length
+jobs:
+  integration:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        conf: [ "c2.large.arm" ]
+        hv: ["kvm"]
+    steps:
+      - name: Setup packages
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.list.save
+          sudo add-apt-repository ppa:longsleep/golang-backports
+          sudo apt install -y golang jq expect
+      - name: Get eden
+        uses: actions/checkout@v2
+      - name: Create ubuntu on packet hosting
+        id: ubuntu
+        run: |
+          packet_ubuntu_id=$(./shell-scripts/packet/create-ubuntu.sh -c c2.large.arm -l dfw2 -p "$PACKET_PROJECT")
+          echo "Packet server ID: ${packet_ubuntu_id}"
+          echo "::set-output name=packet_ubuntu_id::$packet_ubuntu_id"
+          packet_ubuntu_ip=$(./shell-scripts/packet/wait-eth0.sh $packet_ubuntu_id 100)
+          echo "Packet server IP: ${packet_ubuntu_ip}"
+          echo "::set-output name=ip::$packet_ubuntu_ip"
+          echo "Waiting for the deployment to complete"
+          ./shell-scripts/packet/wait-provisioning.sh $packet_ubuntu_id
+          sleep 100
+        env:
+          PACKET_TOKEN: ${{ secrets.PACKET_TOKEN }}
+          PACKET_PROJECT: ${{ secrets.PACKET_PROJECT }}
+      - name: Create ssh key
+        run: |
+          mkdir -p ~/.ssh/keys/
+          echo "$SSH_PRIVATE_KEY" > "$SSH_KEY_PATH"
+          sudo chmod 600 "$SSH_KEY_PATH"
+          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          ./shell-scripts/packet/ssh-add.sh "$SSH_KEY_PATH" "$SSH_PASSPHRASE"
+          ssh-keyscan -H ${{steps.ubuntu.outputs.ip}} > ~/.ssh/known_hosts
+        env:
+          SSH_PRIVATE_KEY: ${{secrets.PACKET_SSH_KEY}}
+          SSH_PASSPHRASE: ${{secrets.PACKET_SSH_PASSPHRASE}}
+          SSH_KEY_PATH: ${{ github.workspace }}/../private.key
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      - name: Install Dependencies to packet EDEN server
+        run: |
+          ssh root@${{steps.ubuntu.outputs.ip}} 'sudo apt-get update && sudo apt-get remove docker docker-engine docker.io containerd runc'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --no-tty --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'echo "deb [arch=arm64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'sudo apt-get install -y jq make git expect qemu binfmt-support qemu-user-static qemu-utils qemu-system-x86 qemu-system-aarch64'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'sudo add-apt-repository ppa:longsleep/golang-backports && sudo apt install -y golang'
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      - name: Get and setup EDEN on packet
+        run: |
+          ssh root@${{steps.ubuntu.outputs.ip}} 'sudo rm -rf ~/eden'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'git clone https://github.com/lf-edge/eden.git && cd eden && git checkout '"$GITHUB_SHA_TMP"' && git reset --hard'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && make clean && make build && make build-tests'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && ./eden config add --devmodel=general --arch=arm64'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && ./eden config set default --key eve.hv --value=kvm'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && ./eden setup -v debug --netboot=true'
+          ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && ./eden start'
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+          GITHUB_SHA_TMP: 4ea0e8ca49e2ea8c1c467a62b543a78d8b84045c
+      - name: Create EVE on packet
+        run: |
+          device_id=$(ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && PACKET_TOKEN='"$PACKET_TOKEN"' ./shell-scripts/packet/create-eve.sh -c c2.large.arm -l dfw2 -p '"$PACKET_PROJECT")
+          echo "Packet EVE ID: $device_id"
+          device_ip=$(ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && PACKET_TOKEN='"$PACKET_TOKEN"' ./shell-scripts/packet/wait-eth0.sh '"$device_id"' 100')
+          echo "Packet EVE IP: $device_ip"
+          ssh root@${{steps.ubuntu.outputs.ip}} 'cd eden && ./eden eve onboard'
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+          PACKET_TOKEN: ${{ secrets.PACKET_TOKEN }}
+          PACKET_PROJECT: ${{ secrets.PACKET_PROJECT }}
