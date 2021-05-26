@@ -7,7 +7,7 @@ function eden_get_ipxe_cfg_url() {
     exit 1
   fi
 
-  set_url_str=$(< "$EDEN_DIR"/dist/default-images/eve/tftp/ipxe.efi.cfg | grep "set url")
+  set_url_str=$(< "$EDEN_DIR"/dist/default-images/eve/tftp/ipxe.efi.cfg grep "set url")
   echo "${set_url_str/"set url "/""}ipxe.efi.cfg"
 }
 
@@ -16,4 +16,4 @@ if [ -z "$ipxe_cfg_url" ]; then
   fail "First, configure eden for network boot"
 fi
 
-$SCRIPT_DIR/create.sh "$@" -os custom_ipxe -ipxe "$ipxe_cfg_url"
+"$SCRIPT_DIR"/create.sh "$@" -os custom_ipxe -ipxe "$ipxe_cfg_url"

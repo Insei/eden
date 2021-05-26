@@ -1,6 +1,5 @@
 #!/bin/bash
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-EDEN_DIR=$SCRIPT_DIR/../../
 
 while true; do
    case "$1" in
@@ -57,9 +56,9 @@ while true; do
    esac
 done
 
-function fail() { echo "ERROR: packet: $@" 1>&2; echo "00000000-0000-0000-0000-000000000000"; exit 1; }
+function fail() { echo "ERROR: packet: $*" 1>&2; echo "00000000-0000-0000-0000-000000000000"; exit 1; }
 
-help_text=`cat << __EOT__
+help_text=$(cat << __EOT__
 Usage: create.sh -l <location> -c <server configuration> -p <packet project id> -os <packet os> [OPTIONS]
 
 OPTIONS:
@@ -68,17 +67,17 @@ OPTIONS:
    -ipxe <string>
       Url to ipxe cfg. Setup only if os param - custom_ipxe.
 
-Create packet server with name eden-<name suffix>-<location>-<conf>. Returns the id of the created packet server to the stdout or 00000000-0000-0000-0000-000000000000 
-as server id on create fail. 
+Create packet server with name eden-<name suffix>-<location>-<conf>. Returns the id of the created packet server to the stdout or 00000000-0000-0000-0000-000000000000
+as server id on create fail.
 ------------------------------------------------------------------------------------------------------
 __EOT__
-`
+)
 
 function packet-cli() {
-   if [ -e $HOME/go/bin/packet-cli ]; then
-     "$HOME"/go/bin/packet-cli $@
+   if [ -e "$HOME"/go/bin/packet-cli ]; then
+     "$HOME"/go/bin/packet-cli "$@"
    else
-      "$GOPATH"/bin/packet-cli $@
+      "$GOPATH"/bin/packet-cli "$@"
    fi
 }
 
@@ -109,12 +108,12 @@ if [ "$PACKET_TOKEN" = "" ]; then
 fi;
 
 ipxe=""
-if ! [ -z "$ipxe_cfg_url" ]; then
+if [ -n "$ipxe_cfg_url" ]; then
    if ! [ "$os" = "custom_ipxe" ]; then
       fail "You can't setup -ipxe with $os"
    fi
    ipxe="-i $ipxe_cfg_url"
 fi
 
-$SCRIPT_DIR/tools/cli-prepare.sh
+"$SCRIPT_DIR"/tools/cli-prepare.sh
 packet_cli_create_device
