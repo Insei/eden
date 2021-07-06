@@ -1,0 +1,90 @@
+---
+name: EdenRPi4
+on:
+  push:
+    branches:
+      - "rpi4-auto-testing-without-vlans"
+# yamllint disable rule:line-length
+jobs:
+  integration:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        devices: ["rpi4-8gb"]
+        hv: ["kvm", "xen"]
+    steps:
+      - name: Get eden
+        uses: actions/checkout@v2
+      - name: Setup packages
+        run: |
+          sudo apt update
+          sudo apt install -y qemu binfmt-support qemu-user-static qemu-utils qemu-system-x86 qemu-system-aarch64 openvpn jq curl
+      - name: Setup OVPN connection to ASBDDS demo
+        id: vpn
+        run: |
+          echo "$ASBDDS_OVPN_CONF_BASE64" | base64 -d > ./config.ovpn
+          echo "$ASBDDS_P12_BASE64" | base64 -d > ./full-time-access.p12
+          echo "$ASBDDS_AUTH_CONF_BASE64" | base64 -d > ./auth.cfg
+          echo "$ASBDDS_KEYPASS_CONF_BASE64" | base64 -d > ./keypass.cfg
+          sudo openvpn --config ./config.ovpn --daemon
+          until ip -f inet addr show tun0; do sleep 5; ip a; done
+          echo ::set-output name=ip::$(ip -f inet addr show tun0 | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
+        env:
+          ASBDDS_OVPN_CONF_BASE64: ${{ secrets.ASBDDS_OVPN_CONF_BASE64 }}
+          ASBDDS_AUTH_CONF_BASE64: ${{ secrets.ASBDDS_AUTH_CONF_BASE64 }}
+          ASBDDS_KEYPASS_CONF_BASE64: ${{ secrets.ASBDDS_KEYPASS_CONF_BASE64 }}
+          ASBDDS_P12_BASE64: ${{ secrets.ASBDDS_P12_BASE64 }}
+      - name: Build eden and tests
+        run: |
+          make build
+          make build-tests
+      - name: Setup EDEN
+        run: |
+          ./eden config add default --devmodel=general --arch=arm64
+          ./eden config set default --key adam.eve-ip --value ${{ steps.vpn.outputs.ip }}
+          ./eden config set default --key registry.ip --value ${{ steps.vpn.outputs.ip }}
+          ./eden config set default --key eve.tag --value "6.10.0"
+          ./eden config set default --key eve.hv --value ${{ matrix.hv }}
+          ./eden setup -v debug --netboot=true
+          ./eden start
+      - name: Create RPi4 with EVE OS via ASBDDS API
+        id: eve
+        run: |
+            TIMEOUT=7800
+            TIME=0
+            device_uuid="$(curl -X 'PUT' -G --data-urlencode "name=${{ matrix.devices }}-eve-${{ matrix.hv }}-workflow-test" --data-urlencode "model=${{ matrix.devices }}" --data-urlencode "ipxe_url=http://${{ steps.vpn.outputs.ip }}:8888/eserver/ipxe.efi.cfg" -s http://10.10.98.2:5000/device | jq -r .data.uuid)"
+            until [ "$TIME" -gt "$TIMEOUT" ] || [ "$device_uuid" != "null" ]; do device_uuid=$(curl -X 'PUT' -G --data-urlencode "model=rpi4-8gb" --data-urlencode "ipxe_url=http://${{ steps.vpn.outputs.ip }}:8888/eserver/ipxe.efi.cfg" -s http://10.10.98.2:5000/device | jq -r .data.uuid); if [ "$device_uuid" == "null" ]; then echo "All devices in the pool are busy, waiting for a free device"; sleep 60; let TIME=TIME+60; fi; done
+            if [ "$TIME" -ge "$TIMEOUT" ] || [ "$device_uuid" = "null" ]; then echo "ERROR: timeout creating rpi4"; exit 1; fi
+            echo ::set-output name=uuid::$device_uuid
+            echo "RPi4 device UUID is $device_uuid"
+            sleep 5
+            TIMEOUT=3600
+            TIME=0
+            echo "Waiting for EVE to install to rpi4"
+            until [ "$TIME" -gt "$TIMEOUT" ] || curl -X 'GET' -s http://10.10.98.2:5000/device/"$device_uuid" | jq -r '.data.state' | grep "poweron"; do sleep 60; let TIME=TIME+60; done
+            if [ "$TIME" -ge "$TIMEOUT" ]; then echo "ERROR: rpi4 provision timeout"; exit 1; fi
+            sleep 40
+      - name: Onboard EVE
+        run: |
+            ./eden eve onboard
+      - name: Run eden workflow test
+        run: |
+            EDEN_TEST_REGISTRY=n ./eden test tests/workflow -v debug
+      - name: Terminate RPi4 board via ASBDDS API
+        if: ${{ always() }}
+        run: |
+            if ! curl -H 'accept: application/json' -X 'DELETE' -s http://10.10.98.2:5000/device/${{ steps.eve.outputs.uuid }} | jq -r '.status.code' | grep "0"; then echo "Failed to terminate rpi4 board";  exit 1; fi
+      - name: Collect logs
+        if: ${{ always() }}
+        run: |
+          ./eden log --format json > trace.log
+          ./eden info > info.log
+      - name: Store raw test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: eve-rpi4-logs-${{ matrix.hv }}
+          path: |
+            ${{ github.workspace }}/trace.log
+            ${{ github.workspace }}/info.log
