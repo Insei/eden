@@ -43,13 +43,14 @@ jobs:
           ./eden config add default --devmodel=general --arch=arm64
           ./eden config set default --key adam.eve-ip --value ${{ steps.vpn.outputs.ip }}
           ./eden config set default --key registry.ip --value ${{ steps.vpn.outputs.ip }}
+          ./eden config set default --key eve.tag --value "6.9.0"
           ./eden config set default --key eve.hv --value ${{ matrix.hv }}
           ./eden setup -v debug --netboot=true
           ./eden start
       - name: Create RPi4 with EVE OS via ASBDDS API
         id: eve
         run: |
-            TIMEOUT=7200
+            TIMEOUT=7800
             TIME=0
             device_uuid="$(curl -X 'PUT' -G --data-urlencode "model=rpi4-8gb" --data-urlencode "ipxe_url=http://${{ steps.vpn.outputs.ip }}:8888/eserver/ipxe.efi.cfg" -s http://10.10.98.2:5000/device | jq -r .data.uuid)"
             until [ "$TIME" -gt "$TIMEOUT" ] || [ "$device_uuid" != "null" ]; do device_uuid=$(curl -X 'PUT' -G --data-urlencode "model=rpi4-8gb" --data-urlencode "ipxe_url=http://${{ steps.vpn.outputs.ip }}:8888/eserver/ipxe.efi.cfg" -s http://10.10.98.2:5000/device | jq -r .data.uuid); if [ "$device_uuid" == "null" ]; then echo "All devices in the pool are busy, waiting for a free device"; sleep 60; let TIME=TIME+60; fi; done
