@@ -11,6 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        devices: ["rpi4-8gb"]
         hv: ["kvm", "xen"]
     steps:
       - name: Get eden
@@ -52,7 +53,7 @@ jobs:
         run: |
             TIMEOUT=7800
             TIME=0
-            device_uuid="$(curl -X 'PUT' -G --data-urlencode "model=rpi4-8gb" --data-urlencode "ipxe_url=http://${{ steps.vpn.outputs.ip }}:8888/eserver/ipxe.efi.cfg" -s http://10.10.98.2:5000/device | jq -r .data.uuid)"
+            device_uuid="$(curl -X 'PUT' -G --data-urlencode "name=${{ matrix.devices }}-eve-${{ matrix.hv }}-workflow-test" --data-urlencode "model=${{ matrix.devices }}" --data-urlencode "ipxe_url=http://${{ steps.vpn.outputs.ip }}:8888/eserver/ipxe.efi.cfg" -s http://10.10.98.2:5000/device | jq -r .data.uuid)"
             until [ "$TIME" -gt "$TIMEOUT" ] || [ "$device_uuid" != "null" ]; do device_uuid=$(curl -X 'PUT' -G --data-urlencode "model=rpi4-8gb" --data-urlencode "ipxe_url=http://${{ steps.vpn.outputs.ip }}:8888/eserver/ipxe.efi.cfg" -s http://10.10.98.2:5000/device | jq -r .data.uuid); if [ "$device_uuid" == "null" ]; then echo "All devices in the pool are busy, waiting for a free device"; sleep 60; let TIME=TIME+60; fi; done
             if [ "$TIME" -ge "$TIMEOUT" ] || [ "$device_uuid" = "null" ]; then echo "ERROR: timeout creating rpi4"; exit 1; fi
             echo ::set-output name=uuid::$device_uuid
