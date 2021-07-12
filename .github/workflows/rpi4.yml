@@ -44,7 +44,7 @@ jobs:
           ./eden config add default --devmodel=general --arch=arm64
           ./eden config set default --key adam.eve-ip --value ${{ steps.vpn.outputs.ip }}
           ./eden config set default --key registry.ip --value ${{ steps.vpn.outputs.ip }}
-          ./eden config set default --key eve.tag --value "6.9.0"
+          ./eden config set default --key eve.tag --value "latest"
           ./eden config set default --key eve.hv --value ${{ matrix.hv }}
           ./eden setup -v debug --netboot=true
           ./eden start
